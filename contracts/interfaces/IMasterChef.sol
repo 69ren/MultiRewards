@@ -11,4 +11,9 @@ interface IMasterChef {
     ) external;
 
     function harvest(uint256 _pid, address _to) external;
+
+    function userInfo(
+        uint256 poolId,
+        address user
+    ) external view returns (uint256 amount, uint256 rewardDebt);
 }

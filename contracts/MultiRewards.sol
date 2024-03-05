@@ -14,6 +14,7 @@ import {
 
 contract MultiRewards is ERC20, ReentrancyGuard, AccessControlEnumerable {
     error ZeroAmount();
+    error Shutdown();
 
     struct Reward {
         uint256 rewardRate;
@@ -42,6 +43,8 @@ contract MultiRewards is ERC20, ReentrancyGuard, AccessControlEnumerable {
         public storedRewardsPerUser;
     mapping(address token => bool) public isReward;
 
+    bool public isShutdown;
+
     event Deposit(address indexed from, uint256 amount);
 
     event Withdraw(address indexed from, uint256 amount);
@@ -57,6 +60,8 @@ contract MultiRewards is ERC20, ReentrancyGuard, AccessControlEnumerable {
         address indexed reward,
         uint256 amount
     );
+
+    event IsShutdown(bool status);
 
     constructor(
         address _admin,
@@ -174,6 +179,10 @@ contract MultiRewards is ERC20, ReentrancyGuard, AccessControlEnumerable {
             revert ZeroAmount();
         }
 
+        if (isShutdown) {
+            revert Shutdown();
+        }
+
         _safeTransferFrom(stakingToken, msg.sender, address(this), amount);
         IMasterChef(masterChef).deposit(poolId, amount, address(this));
         _mint(msg.sender, amount);
@@ -195,11 +204,15 @@ contract MultiRewards is ERC20, ReentrancyGuard, AccessControlEnumerable {
         _burn(msg.sender, amount);
 
         uint256 beetsBalance = _balanceOf(beets, address(this));
-        IMasterChef(masterChef).withdrawAndHarvest(
-            poolId,
-            amount,
-            address(this)
-        );
+
+        if (!isShutdown) {
+            IMasterChef(masterChef).withdrawAndHarvest(
+                poolId,
+                amount,
+                address(this)
+            );
+        }
+
         uint256 beetsBalanceAfter = _balanceOf(beets, address(this));
 
         uint256 _unsyncedBeets = beetsBalanceAfter - beetsBalance;
@@ -291,6 +304,28 @@ contract MultiRewards is ERC20, ReentrancyGuard, AccessControlEnumerable {
         uint256 amount
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         IERC20(token).transfer(to, amount);
+    }
+
+    function shutDown(bool status) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        uint256 balance;
+        if (status) {
+            (balance, ) = IMasterChef(masterChef).userInfo(
+                poolId,
+                address(this)
+            );
+            IMasterChef(masterChef).withdrawAndHarvest(
+                poolId,
+                balance,
+                address(this)
+            );
+            isShutdown = true;
+            emit IsShutdown(true);
+        } else {
+            balance = IERC20(stakingToken).balanceOf(address(this));
+            IMasterChef(masterChef).deposit(poolId, balance, address(this));
+            isShutdown = false;
+            emit IsShutdown(false);
+        }
     }
 
     function _update(
