@@ -7,7 +7,9 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {console} from "forge-std/console.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {IMasterChef} from "../contracts/interfaces/IMasterChef.sol";
-
+import {
+    IAccessControl
+} from "@openzeppelin/contracts/access/IAccessControl.sol";
 contract MultiRewardsTest is Test {
     MultiRewards rewarder;
     IMasterChef masterChef;
@@ -109,5 +111,87 @@ contract MultiRewardsTest is Test {
         assertEq(wFtm.balanceOf(owner), 2e18);
         rewardData = rewarder.rewardData(address(wFtm));
         assertEq(rewardData.rewardPerTokenStored, 2e18);
+    }
+
+    function testPoke() external {
+        vm.startPrank(owner);
+        deal(address(pool), owner, 1e18);
+        pool.approve(address(rewarder), type(uint256).max);
+        rewarder.depositAll();
+
+        vm.warp(block.timestamp + 1);
+        vm.roll(block.number + 1);
+
+        vm.warp(block.timestamp + 1);
+        vm.roll(block.number + 1);
+        rewarder.poke();
+        vm.warp(block.timestamp + 2);
+
+        console.log(rewarder.earned(address(beets), owner));
+    }
+
+    function testTransfer() external {
+        vm.startPrank(owner);
+        deal(address(wFtm), owner, 604800 * 1e18);
+        deal(address(pool), owner, 1e18);
+
+        pool.approve(address(rewarder), type(uint256).max);
+        wFtm.approve(address(rewarder), type(uint256).max);
+
+        rewarder.notifyRewardAmount(address(wFtm), 604800 * 1e18);
+        rewarder.depositAll();
+
+        vm.warp(block.timestamp + 1);
+        assertEq(rewarder.earned(address(wFtm), owner), 1e18);
+        rewarder.transfer(user, 1e18);
+        assertEq(rewarder.balanceOf(address(owner)), 0);
+        assertEq(rewarder.balanceOf(address(user)), 1e18);
+        assertEq(rewarder.earned(address(wFtm), owner), 1e18);
+        assertEq(rewarder.earned(address(wFtm), user), 0);
+
+        vm.warp(block.timestamp + 1);
+        assertEq(rewarder.earned(address(wFtm), owner), 1e18);
+        assertEq(rewarder.earned(address(wFtm), user), 1e18);
+    }
+
+    function testRevertIfCallerNotAuthorized() external {
+        bytes32 role = keccak256("NOTIFIER_ROLE");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                user,
+                role
+            )
+        );
+        vm.startPrank(user);
+        rewarder.notifyRewardAmount(address(wFtm), 1e18);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                user,
+                role
+            )
+        );
+        rewarder.poke();
+
+        role = 0x00;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                user,
+                role
+            )
+        );
+        rewarder.recoverTokens(address(wFtm), owner, 0);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                user,
+                role
+            )
+        );
+        rewarder.shutDown(true);
     }
 }
